@@ -1,0 +1,7 @@
+
+#define BITMAP_DATA 0xE100U // 320x180x16
+#define SCREEN_WIDTH 320U
+#define SCREEN_HEIGHT 180U
+#define BITMAP_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT)
+
+#define OPL_ADDR        0xFE00  // OPL2 Address port

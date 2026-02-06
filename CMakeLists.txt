@@ -5,14 +5,43 @@ add_subdirectory(tools)
 set(LLVM_MOS_PLATFORM rp6502)
 find_package(llvm-mos-sdk REQUIRED)
 
-project(MY-RP6502-PROJECT C CXX ASM)
+project(RPGalaxy C CXX ASM)
 
-add_executable(hello)
-rp6502_executable(hello
+# Define the option (Default is ON/Native) 
+option(USE_NATIVE_OPL2 "Use the RIA native OPL2 support" ON)
+
+if(USE_NATIVE_OPL2)
+    add_definitions(-DUSE_NATIVE_OPL2)
+    message(STATUS "Targeting: Native RIA OPL2")
+else()
+    message(STATUS "Targeting: FPGA TinyFPGA Sound Card")
+endif()
+
+add_executable(RPGalaxy)
+rp6502_executable(RPGalaxy
     DATA file
     RESET file
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.hlp
 )
-target_sources(hello PRIVATE
+target_sources(RPGalaxy PRIVATE
     src/main.c
+    src/opl.c
+    src/instruments.c
+    src/graphics.c
+    src/galaxy.c
+)
+
+# Precomputed Galaxy Version (loads frames from USB)
+add_executable(RPGalaxyPrecomputed)
+rp6502_executable(RPGalaxyPrecomputed
+    DATA file
+    RESET file
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.hlp
+)
+target_sources(RPGalaxyPrecomputed PRIVATE
+    src/main_precomputed.c
+    src/opl.c
+    src/instruments.c
+    src/graphics.c
+    src/galaxy_precomputed.c
 )
