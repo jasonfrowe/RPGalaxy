@@ -17,18 +17,27 @@ else()
     message(STATUS "Targeting: FPGA TinyFPGA Sound Card")
 endif()
 
+
 add_executable(RPGalaxy)
+rp6502_asset(RPGalaxy 0x1F000 images/reticle.bin)
+
 rp6502_executable(RPGalaxy
+    reticle.bin.rp6502
     DATA file
     RESET file
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.hlp
 )
+
+
+
 target_sources(RPGalaxy PRIVATE
     src/main.c
     src/opl.c
     src/instruments.c
     src/graphics.c
     src/galaxy.c
+    src/sprites.c
+    src/input.c
 )
 
 target_link_libraries(RPGalaxy PRIVATE m)

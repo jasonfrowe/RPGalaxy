@@ -7,3 +7,5 @@
 #define PIXEL_DATA_ADDR 0x0000U // Pixel data starts at 0
 
 #define OPL_ADDR        0xFE00  // OPL2 Address port
+#define GAMEPAD_INPUT   0xFF78  // XRAM address for gamepad data
+#define KEYBOARD_INPUT  0xFFA0  // XRAM address for keyboard data
