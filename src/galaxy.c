@@ -30,21 +30,17 @@ static void setup_palette(void) {
     RIA.addr0 = PALETTE_ADDR;
     RIA.step0 = 1;
     
-    // Nebula Palette (0-15 intensity per channel)
-    // We want non-linear ramping to avoid "unicorn barf"
+    // Hubble Palette (Teal & Gold)
     
-    // Pre-calculated ramps for better aesthetics
-    // Pink Ramp: Dark Violet -> Deep Magenta -> Hot Pink (Not White)
-    // Keep Green low to maintain saturation
-    const uint8_t P_R[] = {10, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 235, 245, 250, 255};
-    const uint8_t P_G[] = {0,   0,  0,  0,  5,  10,  15,  20,  25,  30,  40,  50,  60,  70,  80,  90}; // Max Green 90 -> Pink, not White
-    const uint8_t P_B[] = {10, 20, 35, 50, 70,  90, 110, 130, 150, 170, 190, 210, 220, 230, 240, 250};
+    // Channel 1 (Pink var): Gold/Hydrogen (Rust -> Gold -> Pale Yellow)
+    const uint8_t P_R[] = {20, 40, 60, 80, 100, 130, 160, 190, 210, 225, 235, 245, 250, 252, 255, 255};
+    const uint8_t P_G[] = {5,  10, 20, 30,  45,  60,  80, 100, 120, 140, 160, 180, 200, 220, 240, 255};
+    const uint8_t P_B[] = {0,   0,  0,  5,  10,  15,  25,  35,  50,  65,  85, 105, 130, 160, 190, 220};
 
-    // Cyan Ramp: Deep Blue -> Teal -> Electric Cyan (Not White)
-    // Keep Red low to maintain saturation
-    const uint8_t C_R[] = {0,   0,  0,  0,  0,   0,   5,  10,  15,  20,  25,  30,  40,  50,  60,  70}; // Max Red 70 -> Cyan, not White
-    const uint8_t C_G[] = {5,  15, 30, 50, 70,  90, 110, 130, 150, 170, 190, 210, 225, 235, 245, 255};
-    const uint8_t C_B[] = {10, 25, 45, 65, 85, 105, 125, 145, 165, 185, 205, 225, 235, 245, 250, 255};
+    // Channel 2 (Cyan var): Azure/Oxygen (Deep Blue -> Teal -> Ice Blue)
+    const uint8_t C_R[] = {0,   0,  0,  0,   5,  10,  20,  30,  45,  60,  80, 100, 130, 160, 190, 220};
+    const uint8_t C_G[] = {5,  15, 30, 50,  70,  90, 110, 130, 150, 170, 190, 210, 225, 235, 245, 255};
+    const uint8_t C_B[] = {20, 40, 60, 80, 100, 125, 150, 175, 200, 215, 225, 235, 245, 250, 252, 255};
 
     for (int i = 0; i < 256; i++) {
         uint8_t pink = (i >> 4) & 0x0F;
