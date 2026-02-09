@@ -61,17 +61,23 @@ int main(void)
 
     uint8_t vsync_last = RIA.vsync;
 
+    int frame_count = 0;
+
     while (1) {
+        // 1. Poll Audio (High Priority)
+        // Check VSYNC and update music if needed
         uint8_t vsync_now = RIA.vsync;
         if (vsync_now != vsync_last) {
             vsync_last = vsync_now;
-            
-            // AUDIO
             process_audio_frame();
-            
-            // VISUALS
-            galaxy_update();
+            frame_count++;
         }
+        
+        // 2. Poll Simulation (Low Priority)
+        // Run one small slice of the simulation
+        // The galaxy_tick function does a tiny amount of work (256 pixels or 8 interactions)
+        // and returns immediately.
+        galaxy_tick();
     }
 }
 
