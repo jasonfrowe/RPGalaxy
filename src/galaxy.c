@@ -7,7 +7,7 @@
 
 // #define N 64 (Replaced by N 80 below)
 #define SCALE 60 // Screen scale factor
-#define T_INC 25 // 0.2 in 8.8 fixed point
+#define T_INC 5 // 0.2 in 8.8 fixed point
 
 // Globals
 static int16_t x, y, t;
@@ -132,8 +132,8 @@ bool galaxy_tick(void)
                         uint8_t pink = (val >> 4) & 0x0F;
                         uint8_t cyan = val & 0x0F;
                         
-                        if (pink <= 5) pink = 0; else pink -= 5;
-                        if (cyan <= 5) cyan = 0; else cyan -= 5;
+                        if (pink <= 8) pink = 0; else pink -= 8;
+                        if (cyan <= 8) cyan = 0; else cyan -= 8;
                         
                         val = (pink << 4) | cyan;
                         RIA.addr0 -= 2; 
