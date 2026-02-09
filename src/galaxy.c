@@ -1,9 +1,11 @@
 #include <rp6502.h>
 #include <stdint.h>
+#include <stdlib.h> // for abs
 #include "galaxy.h"
 #include "tables.h"
 #include "constants.h"
 #include "graphics.h"
+#include "sprites.h" // For enemies/workers
 
 // #define N 64 (Replaced by N 80 below)
 #define SCALE 60 // Screen scale factor
@@ -28,43 +30,52 @@ static void setup_palette(void) {
     RIA.addr0 = PALETTE_ADDR;
     RIA.step0 = 1;
     
-    // Synthwave Palette (Bit-Masked Mixing)
-    // High Nibble (0xF0): Pink Channel (0..15)
-    // Low Nibble  (0x0F): Cyan Channel (0..15)
+    // Nebula Palette (0-15 intensity per channel)
+    // We want non-linear ramping to avoid "unicorn barf"
     
-    // R = Pink * 17
-    // B = Cyan * 17
-    // G = (Pink*8 + Cyan*8) (Mixes to white)
-    
+    // Pre-calculated ramps for better aesthetics
+    // Pink Ramp: Dark Violet -> Deep Magenta -> Hot Pink (Not White)
+    // Keep Green low to maintain saturation
+    const uint8_t P_R[] = {10, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 235, 245, 250, 255};
+    const uint8_t P_G[] = {0,   0,  0,  0,  5,  10,  15,  20,  25,  30,  40,  50,  60,  70,  80,  90}; // Max Green 90 -> Pink, not White
+    const uint8_t P_B[] = {10, 20, 35, 50, 70,  90, 110, 130, 150, 170, 190, 210, 220, 230, 240, 250};
+
+    // Cyan Ramp: Deep Blue -> Teal -> Electric Cyan (Not White)
+    // Keep Red low to maintain saturation
+    const uint8_t C_R[] = {0,   0,  0,  0,  0,   0,   5,  10,  15,  20,  25,  30,  40,  50,  60,  70}; // Max Red 70 -> Cyan, not White
+    const uint8_t C_G[] = {5,  15, 30, 50, 70,  90, 110, 130, 150, 170, 190, 210, 225, 235, 245, 255};
+    const uint8_t C_B[] = {10, 25, 45, 65, 85, 105, 125, 145, 165, 185, 205, 225, 235, 245, 250, 255};
+
     for (int i = 0; i < 256; i++) {
         uint8_t pink = (i >> 4) & 0x0F;
         uint8_t cyan = i & 0x0F;
         
-        // Scale 0..15 to 0..255
-        // x * 17 covers 0..255 exactly (15*17 = 255)
+        // Additive Mixing
+        uint16_t r_sum = P_R[pink] + C_R[cyan];
+        uint16_t g_sum = P_G[pink] + C_G[cyan];
+        uint16_t b_sum = P_B[pink] + C_B[cyan];
         
-        // Red Channel: Driven ONLY by Pink (High Nibble)
-        uint8_t r = pink * 17;
-        
-        // Green Channel: Driven ONLY by Cyan (Low Nibble)
-        // (Previously we added Pink to Green, which made it Orange/Gold. Removed that.)
-        uint8_t g = cyan * 17;
-        
-        // Blue Channel: Driven by BOTH
-        // Pink needs Blue to be Magenta (R+B). 
-        // Cyan needs Blue to be Cyan (G+B).
-        // Standard additive mixing.
-        uint16_t b_sum = (pink * 17) + (cyan * 17);
+        uint8_t r = (r_sum > 255) ? 255 : (uint8_t)r_sum;
+        uint8_t g = (g_sum > 255) ? 255 : (uint8_t)g_sum;
         uint8_t b = (b_sum > 255) ? 255 : (uint8_t)b_sum;
         
         // Convert to RP6502 format with Alpha set
-        uint16_t color = COLOR_FROM_RGB8(r, g, b) | COLOR_ALPHA_MASK;
+        // Index 0 must be transparent for Sprites
+        uint16_t color = COLOR_FROM_RGB8(r, g, b);
+        if (i > 0) color |= COLOR_ALPHA_MASK;
         
         // Write Little Endian
         RIA.rw0 = color & 0xFF;
         RIA.rw0 = (color >> 8) & 0xFF;
     }
 }
+
+
+
+#define N 80 // Increased density
+
+// Particle State: 0 = Normal, 1 = Infected (Cyan Only)
+static uint8_t particle_state[N];
 
 void galaxy_init(void)
 {
@@ -81,9 +92,20 @@ void galaxy_init(void)
     for (uint16_t k = 0; k < BITMAP_SIZE; k++) {
         RIA.rw0 = 0;
     }
+    
+    // Initialize particles to Normal
+    for (int i = 0; i < N; i++) {
+        particle_state[i] = 0;
+    }
 }
 
-#define N 80 // Increased density
+void galaxy_randomize(uint16_t seed)
+{
+    // Simple LCG
+    x = seed;
+    y = seed * 3 + 12345;
+    t = seed * 7 + 54321;
+}
 
 // Stride for decay to save CPU cycles
 // Decay 1/2 of the screen per frame in a rolling pattern
@@ -132,8 +154,10 @@ bool galaxy_tick(void)
                         uint8_t pink = (val >> 4) & 0x0F;
                         uint8_t cyan = val & 0x0F;
                         
-                        if (pink <= 8) pink = 0; else pink -= 8;
-                        if (cyan <= 8) cyan = 0; else cyan -= 8;
+                        // Exponential Decay (Divide by 2)
+                        // 15->7->3->1->0. Kills blobs fast.
+                        pink >>= 1;
+                        cyan >>= 1;
                         
                         val = (pink << 4) | cyan;
                         RIA.addr0 -= 2; 
@@ -207,30 +231,46 @@ bool galaxy_tick(void)
                 int16_t u = SIN_LUT[idx_u1] + SIN_LUT[idx_u2];
                 int16_t v = SIN_LUT[(uint8_t)(idx_u1 + 64)] + SIN_LUT[(uint8_t)(idx_u2 + 64)];
                 
-                // Note: updating global x,y here might be tricky if we split it? 
-                // Wait, x/y are global state derived from u/v/t.
-                // Actually, the original code had:
-                // x = u + t;
-                // y = v; 
-                // inside result of i,j loop? NO.
-                // Original:
-                // loop i:
-                //   loop j:
-                //      calc u, v
-                //      x = u + t;
-                //      y = v;
-                //      draw(x,y)
-                
-                // So yes, x and y are updated every inner loop iteration.
-                // They act as feedback for the NEXT iteration (since x/y are used in u/v calc).
-                // So order matters strictly.
-                
                 // Update Globals for next step
                 x = u + t;
                 y = v; 
                 
                 int16_t screen_x = ((u * SCALE) >> 8) + (SCREEN_WIDTH / 2);
                 int16_t screen_y = ((v * SCALE) >> 8) + (SCREEN_HEIGHT / 2);
+
+                // --- INFECTION / HEALING CHECK ---
+                // Only check for i (the particle being updated)
+                // Check once per inner loop? No, that's expensive (N*N).
+                // But we need to check the *current* screen_x/y which changes every step.
+                // So yes, we check every step.
+                
+                // Check Enemies (Infect)
+                for (int e = 0; e < MAX_ENEMIES; e++) {
+                    if (enemies[e].active) {
+                        int16_t ex = (enemies[e].x >> 4) + 8; // Center
+                        int16_t ey = (enemies[e].y >> 4) + 8;
+                        
+
+                        
+                        // RADIUS 16 for testing
+                        if (abs(screen_x - ex) < 16 && abs(screen_y - ey) < 16) {
+                            particle_state[i] = 1; // Infected
+                        }
+                    }
+                }
+                
+                // Check Gardeners (Heal)
+                for (int w = 0; w < MAX_WORKERS; w++) {
+                    if (workers[w].active && workers[w].type == 1) { // Type 1 = Gardener
+                        int16_t wx = (workers[w].x >> 4) + 8;
+                        int16_t wy = (workers[w].y >> 4) + 8;
+                        if (abs(screen_x - wx) < 16 && abs(screen_y - wy) < 16) {
+                            particle_state[i] = 0; // Healed
+                        }
+                    } 
+                }
+                
+                uint8_t is_infected = particle_state[i];
                 
                 // Draw 3x3 Blur Patch
                 for (int dy = -1; dy <= 1; dy++) {
@@ -240,8 +280,10 @@ bool galaxy_tick(void)
                         
                         if (px >= 0 && px < SCREEN_WIDTH && py >= 0 && py < SCREEN_HEIGHT) {
                             uint16_t addr = (uint16_t)px + (SCREEN_WIDTH * (uint16_t)py);
+                            
+                            // Color Logic
                             uint8_t is_pink = (i < (N/2));
-                            uint8_t add_amount = (dx == 0 && dy == 0) ? 12 : 4;
+                            if (is_infected) is_pink = 0; // Force Cyan
                             
                             RIA.addr0 = addr;
                             RIA.step0 = 0; 
@@ -249,6 +291,9 @@ bool galaxy_tick(void)
                             
                             uint8_t pink = (old_val >> 4) & 0x0F;
                             uint8_t cyan = old_val & 0x0F;
+                            
+                            // Strong Accumulation (+6 Center, +2 Neighbor)
+                            uint8_t add_amount = (dx == 0 && dy == 0) ? 6 : 2;
                             
                             if (is_pink) {
                                 if (pink < (15 - add_amount)) pink += add_amount;
@@ -269,3 +314,5 @@ bool galaxy_tick(void)
     }
     return false;
 }
+
+
