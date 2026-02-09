@@ -31,17 +31,4 @@ target_sources(RPGalaxy PRIVATE
     src/galaxy.c
 )
 
-# Precomputed Galaxy Version (loads frames from USB)
-add_executable(RPGalaxyPrecomputed)
-rp6502_executable(RPGalaxyPrecomputed
-    DATA file
-    RESET file
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.hlp
-)
-target_sources(RPGalaxyPrecomputed PRIVATE
-    src/main_precomputed.c
-    src/opl.c
-    src/instruments.c
-    src/graphics.c
-    src/galaxy_precomputed.c
-)
+target_link_libraries(RPGalaxy PRIVATE m)

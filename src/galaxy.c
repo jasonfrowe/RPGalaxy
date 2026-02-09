@@ -1,186 +1,214 @@
 #include <rp6502.h>
-#include <stdbool.h>
-
+#include <stdint.h>
 #include "galaxy.h"
-#include "graphics.h"
+#include "tables.h"
 #include "constants.h"
+#include "graphics.h"
 
-// Parameters
-// Original N=200 -> 40,000 pts. Too slow for 6502.
-// Try smaller N initially. 
-// N=125 -> 15,625 pts. (Uses ~47KB RAM).
-#define GALAXY_N 125
-// Update 400 dots per frame -> 39 frames for full update (~0.66s cycle)
-#define BATCH_SIZE 25
+// #define N 64 (Replaced by N 80 below)
+#define SCALE 60 // Screen scale factor
+#define T_INC 25 // 0.2 in 8.8 fixed point
 
-// Stores valid coordinates (0..SCREEN_WIDTH/HEIGHT) or a marker for invalid/off-screen.
-// Using uint16_t for X allows valid range 0-320. 
-// Using uint8_t for Y allows valid range 0-180.
-// X=0xFFFF is "not drawn" marker.
-static uint16_t last_x[GALAXY_N * GALAXY_N];
-static uint8_t  last_y[GALAXY_N * GALAXY_N];
-static bool first_frame = true;
+// Globals
+static int16_t x, y, t;
 
-// Pre-scaled LUTs: sin(angle) * 960
-static const int16_t sin_lut[256] = {
-0,23,47,70,94,117,140,164,187,210,233,256,278,301,323,345,367,389,410,431,452,473,493,513,533,552,571,590,609,627,644,661,678,695,711,726,742,756,771,784,798,811,823,835,846,857,867,877,886,895,903,911,918,925,931,936,941,945,949,952,955,957,958,959,960,959,958,957,955,952,949,945,941,936,931,925,918,911,903,895,886,877,867,857,846,835,823,811,798,784,771,756,742,726,711,695,678,661,644,627,609,590,571,552,533,513,493,473,452,431,410,389,367,345,323,301,278,256,233,210,187,164,140,117,94,70,47,23,0,-23,-47,-70,-94,-117,-140,-164,-187,-210,-233,-256,-278,-301,-323,-345,-367,-389,-410,-431,-452,-473,-493,-513,-533,-552,-571,-590,-609,-627,-644,-661,-678,-695,-711,-726,-742,-756,-771,-784,-798,-811,-823,-835,-846,-857,-867,-877,-886,-895,-903,-911,-918,-925,-931,-936,-941,-945,-949,-952,-955,-957,-958,-959,-960,-959,-958,-957,-955,-952,-949,-945,-941,-936,-931,-925,-918,-911,-903,-895,-886,-877,-867,-857,-846,-835,-823,-811,-798,-784,-771,-756,-742,-726,-711,-695,-678,-661,-644,-627,-609,-590,-571,-552,-533,-513,-493,-473,-452,-431,-410,-389,-367,-345,-323,-301,-278,-256,-233,-210,-187,-164,-140,-117,-94,-70,-47,-23
-};
-static const int16_t cos_lut[256] = {
-960,959,958,957,955,952,949,945,941,936,931,925,918,911,903,895,886,877,867,857,846,835,823,811,798,784,771,756,742,726,711,695,678,661,644,627,609,590,571,552,533,513,493,473,452,431,410,389,367,345,323,301,278,256,233,210,187,164,140,117,94,70,47,23,0,-23,-47,-70,-94,-117,-140,-164,-187,-210,-233,-256,-278,-301,-323,-345,-367,-389,-410,-431,-452,-473,-493,-513,-533,-552,-571,-590,-609,-627,-644,-661,-678,-695,-711,-726,-742,-756,-771,-784,-798,-811,-823,-835,-846,-857,-867,-877,-886,-895,-903,-911,-918,-925,-931,-936,-941,-945,-949,-952,-955,-957,-958,-959,-960,-959,-958,-957,-955,-952,-949,-945,-941,-936,-931,-925,-918,-911,-903,-895,-886,-877,-867,-857,-846,-835,-823,-811,-798,-784,-771,-756,-742,-726,-711,-695,-678,-661,-644,-627,-609,-590,-571,-552,-533,-513,-493,-473,-452,-431,-410,-389,-367,-345,-323,-301,-278,-256,-233,-210,-187,-164,-140,-117,-94,-70,-47,-23,0,23,47,70,94,117,140,164,187,210,233,256,278,301,323,345,367,389,410,431,452,473,493,513,533,552,571,590,609,627,644,661,678,695,711,726,742,756,771,784,798,811,823,835,846,857,867,877,886,895,903,911,918,925,931,936,941,945,949,952,955,957,958,959
-};
+// Helper to wrap angle to 0-255 for LUT access
+// In Python: sin(i + y) where y is float (scaled by 256 here)
+// i is integer 0..63. 1 radian approx 41 units in 0..255 scale (256 / 2PI)
+#define RAD_SCALE 41
 
-// Global state using 8.8 fixed point for accumulation
-static int16_t t_fp = 0; 
-static int16_t gx_fp = 0;
-static int16_t gy_fp = 0;
 
-// Render loop state
-static int cur_i = 0;
-static int cur_j = 0;
 
-static inline int16_t lut_sin(uint8_t idx) {
-    return sin_lut[idx];
-}
+// RP6502 Color Format: BBBBB GGGGG A RRRRR
+// Bits: 15-11 (Blue), 10-6 (Green), 5 (Alpha), 4-0 (Red)
+#define COLOR_FROM_RGB8(r,g,b) (((b>>3)<<11)|((g>>3)<<6)|(r>>3))
+#define COLOR_ALPHA_MASK (1u<<5)
 
-static inline int16_t lut_cos(uint8_t idx) {
-    return cos_lut[idx];
-}
-
-void galaxy_init(void) {
-    t_fp = 0;
-    gx_fp = 0;
-    gy_fp = 0;
-    cur_i = 0;
-    cur_j = 0;
-}
-
-// Python logic:
-// r = TAU / N
-// for i in range(N):
-//    for j in range(N):
-//       u = sin(i + y) + sin(r * i + x)
-//       v = cos(i + y) + cos(r * i + x)
-//       x = u + t
-//       y = v
-//       fill(i, c, 99) -> color depends on i, j? python says `c` which is `j`.
-//       circle(...)
-
-// Optimization:
-// r_fp = (256 / N) if we map 2PI to 256. 
-// Or better: angle units = 256 per rotation.
-// r_fixed = 256 / N
-
-void galaxy_draw(void) {
-    if (first_frame) {
-        // Clear screen once
-        RIA.addr0 = 0;
-        RIA.step0 = 1;
-        for (unsigned i = 0; i < BITMAP_SIZE; i++) {
-            RIA.rw0 = 0;
-        }
-        // Init cache
-        for (int k = 0; k < GALAXY_N * GALAXY_N; k++) {
-            last_x[k] = 0xFFFF;
-        }
-        first_frame = false;
-    }
-
-    int16_t u, v;
-
-    // Calc base pointer offset
-    uint16_t offset = (cur_i * GALAXY_N) + cur_j;
-    uint16_t *lx = &last_x[offset];
-    uint8_t  *ly = &last_y[offset];
-
-    // Direct RIA access prevents function call overhead
-    // RIA.step0 should be 1.
+static void setup_palette(void) {
+    RIA.addr0 = PALETTE_ADDR;
     RIA.step0 = 1;
-
-    // Process a batch
-    for (int b = 0; b < BATCH_SIZE; b++) {
-        // Hoist i-dependent math (recalc if cur_j resets)
-        // Since we loop j inside, we can just use cur_i/cur_j vars
+    
+    // Synthwave Palette (Bit-Masked Mixing)
+    // High Nibble (0xF0): Pink Channel (0..15)
+    // Low Nibble  (0x0F): Cyan Channel (0..15)
+    
+    // R = Pink * 17
+    // B = Cyan * 17
+    // G = (Pink*8 + Cyan*8) (Mixes to white)
+    
+    for (int i = 0; i < 256; i++) {
+        uint8_t pink = (i >> 4) & 0x0F;
+        uint8_t cyan = i & 0x0F;
         
-        // Precise angle calc to ensure full coverage 0-255
-        uint8_t angle_ri = (uint8_t)(((uint16_t)cur_i * 256) / GALAXY_N); 
-        uint8_t i_ang = (uint8_t)(cur_i * 41);
-        uint8_t i_col_base = 16 + (cur_i * 11);
+        // Scale 0..15 to 0..255
+        // x * 17 covers 0..255 exactly (15*17 = 255)
+        
+        // Red Channel: Driven ONLY by Pink (High Nibble)
+        uint8_t r = pink * 17;
+        
+        // Green Channel: Driven ONLY by Cyan (Low Nibble)
+        // (Previously we added Pink to Green, which made it Orange/Gold. Removed that.)
+        uint8_t g = cyan * 17;
+        
+        // Blue Channel: Driven by BOTH
+        // Pink needs Blue to be Magenta (R+B). 
+        // Cyan needs Blue to be Cyan (G+B).
+        // Standard additive mixing.
+        uint16_t b_sum = (pink * 17) + (cyan * 17);
+        uint8_t b = (b_sum > 255) ? 255 : (uint8_t)b_sum;
+        
+        // Convert to RP6502 format with Alpha set
+        uint16_t color = COLOR_FROM_RGB8(r, g, b) | COLOR_ALPHA_MASK;
+        
+        // Write Little Endian
+        RIA.rw0 = color & 0xFF;
+        RIA.rw0 = (color >> 8) & 0xFF;
+    }
+}
 
-        // 1. ERASE OLD PIXEL
-        uint16_t old_x = *lx;
-        if (old_x != 0xFFFF) {
-            uint8_t old_y = *ly;
-            RIA.addr0 = (uint16_t)(old_x + (SCREEN_WIDTH * old_y));
-            RIA.rw0 = 0; // Black
+void galaxy_init(void)
+{
+    // Initialize variables
+    x = 0;
+    y = 0;
+    t = 0;
+    
+    setup_palette();
+    
+    // Clear screen
+    RIA.addr0 = PIXEL_DATA_ADDR;
+    RIA.step0 = 1;
+    for (uint16_t k = 0; k < BITMAP_SIZE; k++) {
+        RIA.rw0 = 0;
+    }
+}
+
+#define N 80 // Increased density
+
+// Stride for decay to save CPU cycles
+// Decay 1/2 of the screen per frame in a rolling pattern
+static uint8_t decay_pass = 0;
+
+void galaxy_update(void)
+{
+    uint16_t start_idx = decay_pass; 
+    RIA.addr0 = PIXEL_DATA_ADDR + start_idx;
+    RIA.step0 = 2; // Skip 2 pixels at a time (Process 50%)
+    
+    // Bit-Masked Decay
+    for (uint16_t i = 0; i < (BITMAP_SIZE / 2); i++) {
+        // Read
+        uint8_t val = RIA.rw0;
+        
+        if (val > 0) {
+            uint8_t pink = (val >> 4) & 0x0F;
+            uint8_t cyan = val & 0x0F;
+            
+            // Independent Channel Decay
+            // Decay by 5 (gone in 3 frames from max 15)
+            
+            if (pink <= 5) pink = 0;
+            else pink -= 5;
+            
+            if (cyan <= 5) cyan = 0;
+            else cyan -= 5;
+            
+            val = (pink << 4) | cyan;
+            
+            // Write back
+            RIA.addr0 -= 2; // Backup
+            RIA.rw0 = val;  // Write
         }
+    }
+    
+    decay_pass = (decay_pass + 1) & 1; // 0, 1
 
-        // 2. CALC
-        // y contribution
-        // Combined: ((gy_int * 41) + ((gy_frac * 41) >> 8))
-        // But simplify: just use map 256 -> 256? No python code maps radians.
-        // Let's stick to the 41 scaling for angle correctness.
-        // gy_fp and gx_fp are 8.8.
-        uint8_t y_ang = (uint8_t)(((gy_fp >> 8) * 41) + ((gy_fp & 0xFF) * 41 >> 8));
-        uint8_t angle1 = i_ang + y_ang;
+    // Increment time
+    if (t > 1608) t -= 1608; 
+    t += T_INC;
 
-        // x contribution
-        uint8_t x_ang = (uint8_t)(((gx_fp >> 8) * 41) + ((gx_fp & 0xFF) * 41 >> 8));
-        uint8_t angle2 = angle_ri + x_ang;
-
-        int16_t s1 = lut_sin(angle1);
-        int16_t s2 = lut_sin(angle2);
-        int16_t c1 = lut_cos(angle1);
-        int16_t c2 = lut_cos(angle2);
-
-        u = s1 + s2; 
-        v = c1 + c2;
-
-        // Update state 
-        // u is (Scale 960).
-        // gx_fp needs (Scale 240) approx 8.8.
-        // 960 >> 2 = 240.
-        // Feedback loop has 4x more precision than before (Scale 240 vs 60).
-        gx_fp = (u >> 2) + t_fp;
-        gy_fp = (v >> 2);
-
-        // Screen coords
-        // u is Scale 960. Screen is Scale 60.
-        // 960 >> 4 = 60.
-        int16_t sx = 160 + (u >> 4);
-        int16_t sy_raw = (v >> 4);
-        int16_t sy = 90 + sy_raw - (sy_raw >> 2);
-
-        // 3. DRAW NEW PIXEL & STORE
-        if (sx >= 0 && sx < SCREEN_WIDTH && sy >= 0 && sy < SCREEN_HEIGHT) {
-            // Optimized rainbow color: No modulo
-            uint8_t col = i_col_base + cur_j;
-
-            RIA.addr0 = (uint16_t)(sx + (SCREEN_WIDTH * sy));
-            RIA.rw0 = col;
-
-            *lx = (uint16_t)sx;
-            *ly = (uint8_t)sy;
-        } else {
-            *lx = 0xFFFF;
-        }
-
-        lx++;
-        ly++;
-        cur_j++;
-        if (cur_j >= GALAXY_N) {
-            cur_j = 0;
-            cur_i++;
-            if (cur_i >= GALAXY_N) {
-                cur_i = 0;
-                // Cycle Complete
-                
-                // Update Time Step Here (Once per full cycle)
-                // Slow evolution: 1 unit per cycle.
-                t_fp += 1; 
-
-                // Reset pointers
-                lx = last_x;
-                ly = last_y;
+    int16_t i, j;
+    int16_t u, v;
+    int16_t screen_x, screen_y;
+    
+    for (i = 0; i < N; i++) {
+        uint8_t ri_idx = (i * 4); 
+        uint8_t i_rad_idx = (uint8_t)(((int32_t)i * RAD_SCALE)); // i converted to rad index
+        
+        for (j = 0; j < N; j++) {
+            // u = sin(i+y)+sin(r*i+x)
+            
+            // Convert y (8.8) to LUT index
+            uint8_t y_idx = (uint8_t)(((int32_t)y * RAD_SCALE) >> 8);
+            uint8_t x_idx = (uint8_t)(((int32_t)x * RAD_SCALE) >> 8);
+            
+            uint8_t idx_u1 = i_rad_idx + y_idx;
+            uint8_t idx_u2 = ri_idx + x_idx;
+            
+            u = SIN_LUT[idx_u1] + SIN_LUT[idx_u2]; // Range -512..512 (2.0 in 8.8)
+            
+            // v = cos(i+y)+cos(r*i+x)
+            // cos(phi) = sin(phi + PI/2) = sin(idx + 64)
+            
+            v = SIN_LUT[(uint8_t)(idx_u1 + 64)] + SIN_LUT[(uint8_t)(idx_u2 + 64)];
+            
+            // x = u + t
+            x = u + t;
+            y = v; // y is just v
+            
+            // Draw
+            // circle(u*N/2+W/2, y*N/2+W/2, 2)
+            // our u is 8.8 fixed point. 
+            // Screen pos = (u * SCALE) >> 8 + Center
+            
+            screen_x = ((u * SCALE) >> 8) + (SCREEN_WIDTH / 2);
+            screen_y = ((v * SCALE) >> 8) + (SCREEN_HEIGHT / 2);
+            
+            // Draw 3x3 Blur Patch
+            // Center is bright, outer ring is faint
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    int16_t px = screen_x + dx;
+                    int16_t py = screen_y + dy;
+                    
+                    // Clip
+                    if (px >= 0 && px < SCREEN_WIDTH && py >= 0 && py < SCREEN_HEIGHT) {
+                        // Bit-Masked Mixing
+                        uint16_t addr = (uint16_t)px + (SCREEN_WIDTH * (uint16_t)py);
+                        
+                        // Determine Particle Stream (Pink or Cyan)
+                        uint8_t is_pink = (i < (N/2));
+                        
+                        // Determine Brightness Addition
+                        // Center (0,0) = High (+12)
+                        // Outer Ring = Low (+4)
+                        uint8_t add_amount = (dx == 0 && dy == 0) ? 12 : 4;
+                        
+                        // Read current pixel
+                        RIA.addr0 = addr;
+                        RIA.step0 = 0; 
+                        uint8_t old_val = RIA.rw0;
+                        
+                        // Deconstruct
+                        uint8_t pink = (old_val >> 4) & 0x0F;
+                        uint8_t cyan = old_val & 0x0F;
+                        
+                        // Add Brightness
+                        if (is_pink) {
+                            if (pink < (15 - add_amount)) pink += add_amount;
+                            else pink = 15;
+                        } else {
+                            if (cyan < (15 - add_amount)) cyan += add_amount;
+                            else cyan = 15;
+                        }
+                        
+                        // Reconstruct
+                        uint8_t new_val = (pink << 4) | cyan;
+                        
+                        // Write back
+                        RIA.rw0 = new_val;
+                    }
+                }
             }
         }
     }

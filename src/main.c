@@ -18,25 +18,19 @@ static void init_graphics(void)
     xregn(1, 0, 0, 1, 2); // 320x180
 
     BITMAP_CONFIG = BITMAP_DATA;
-
+    
+    // Note: galaxy_init handles palette and clearing now
+    
     // Configure bitmap parameters
     xram0_struct_set(BITMAP_CONFIG, vga_mode3_config_t, x_pos_px, 0);
     xram0_struct_set(BITMAP_CONFIG, vga_mode3_config_t, y_pos_px, 0);
     xram0_struct_set(BITMAP_CONFIG, vga_mode3_config_t, width_px, 320);
     xram0_struct_set(BITMAP_CONFIG, vga_mode3_config_t, height_px, 180);
     xram0_struct_set(BITMAP_CONFIG, vga_mode3_config_t, xram_data_ptr, 0);
-    xram0_struct_set(BITMAP_CONFIG, vga_mode3_config_t, xram_palette_ptr, 0xFFFF); // Use built in palette
+    xram0_struct_set(BITMAP_CONFIG, vga_mode3_config_t, xram_palette_ptr, PALETTE_ADDR); // Use custom palette
     
     // Enable Mode 3 bitmap (8-bit color)
     xregn(1, 0, 1, 4, 3, 3, BITMAP_CONFIG, 1);
-
-    // Clear bitmap memory
-    RIA.addr0 = 0;
-    RIA.step0 = 1;
-    for (unsigned i = 0; i < BITMAP_SIZE; i++) {
-        RIA.rw0 = 0;
-    }
-
 }
 
 void init_all_systems(void) {
@@ -49,7 +43,6 @@ void init_all_systems(void) {
     
     // Galaxy Setup
     galaxy_init();
-
 }
 
 void process_audio_frame(void) {
@@ -77,9 +70,9 @@ int main(void)
             process_audio_frame();
             
             // VISUALS
-            galaxy_draw();
-
+            galaxy_update();
         }
     }
-
 }
+
+
