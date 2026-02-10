@@ -31,6 +31,7 @@ You can spawn workers to protect the galaxy. Workers also follow Keplerian orbit
 ### Controls 🖱️
 *   **Aim**: Move the reticle.
 *   **Spawn**: Click to release a worker.
+*   **Reset**: Press **START** to clear the board and restart the game.
 *   **Orbit Control**:
     *   **Direction**: The worker spawns at the **Apocenter** (farthest point) aligned with your click. It will fall inward.
     *   **Shape**: The **Reticle Pulses**. 

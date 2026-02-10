@@ -43,6 +43,7 @@ void update_enemies(void);
 void update_workers(void);
 void spawn_enemy(int16_t x, int16_t y);
 void spawn_worker(uint8_t type, int16_t x, int16_t y);
+void reset_sprites(void);
 void update_reticle_position(int8_t dx, int8_t dy);
 
 #endif // SPRITES_H

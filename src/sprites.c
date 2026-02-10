@@ -376,7 +376,9 @@ void update_enemies(void) {
         // Render - Affine Calculation
         int16_t scale = 256; // 1.0
         // Fix: Use High Byte of 8.8 angle!
-        uint8_t angle = (enemies[i].angle >> 8);
+        // ROTATION FIX: Negate angle for CW rotation (User Request)
+        uint8_t angle = -(enemies[i].angle >> 8);
+        
         int16_t c = SIN_LUT[(uint8_t)(angle + 64)]; // cos
         int16_t s = SIN_LUT[angle]; // sin
         
@@ -559,4 +561,25 @@ void update_sprites(void)
     // Update Position Dynamically
     xram0_struct_set(SPRITE_CONFIG_ADDR, vga_mode4_asprite_t, x_pos_px, reticle_x);
     xram0_struct_set(SPRITE_CONFIG_ADDR, vga_mode4_asprite_t, y_pos_px, reticle_y);
+}
+
+void reset_sprites(void) {
+    // Clear Enemies
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        enemies[i].active = false;
+        // Update struct to hide them immediately
+        unsigned config_addr = ENEMY_CONFIG_BASE + (i * sizeof(vga_mode4_asprite_t));
+        xram0_struct_set(config_addr, vga_mode4_asprite_t, y_pos_px, -32);
+    }
+    
+    // Clear Workers
+    for (int i = 0; i < MAX_WORKERS; i++) {
+        workers[i].active = false;
+        unsigned config_addr = WORKER_CONFIG_BASE + (i * sizeof(vga_mode4_asprite_t));
+        xram0_struct_set(config_addr, vga_mode4_asprite_t, y_pos_px, -32);
+    }
+    
+    // Respawn Initials
+    spawn_enemy(50, 50);
+    spawn_enemy(270, 130);
 }

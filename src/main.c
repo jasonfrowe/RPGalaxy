@@ -135,6 +135,12 @@ int main(void)
             if (is_action_pressed(0, ACTION_UP)) dy -= 2;
             if (is_action_pressed(0, ACTION_DOWN)) dy += 2;
             
+            // START Button Reset
+            if (spawn_cooldown == 0 && (gamepad[0].btn0 & GP_BTN_START)) {
+                reset_sprites();
+                spawn_cooldown = 30; // 0.5s cooldown
+            }
+            
             // Analog Controls
             if (dx == 0 && dy == 0) {
                 if (abs(gamepad[0].lx) > 10) dx = gamepad[0].lx / 16;
