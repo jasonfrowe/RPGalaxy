@@ -2,6 +2,8 @@
 
 A chaotic attractor simulation and biological galaxy defense game running on the [RP6502 Picocomputer](https://github.com/picocomputer/rp6502).
 
+![RPGalaxy Gameplay GIF](images/RPGalaxy.gif)
+
 ## 1. The Simulation 🌀
 The core visual is a **strange attractor** mathematical system, inspired by a generative art algorithm.
 *   **Math**: The system iterates $x$ and $y$ coordinates through a feedback loop involving sine and cosine waves:
