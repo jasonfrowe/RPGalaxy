@@ -248,7 +248,8 @@ bool galaxy_tick(void)
                         
 
                         
-                        // RADIUS 16 for testing
+                        // RADIUS 16 (Box 32x32)
+                        // User requested Enemy Box 32x32 -> Radius 16
                         if (abs(screen_x - ex) < 16 && abs(screen_y - ey) < 16) {
                             particle_state[i] = 1; // Infected
                         }
@@ -260,13 +261,14 @@ bool galaxy_tick(void)
                     if (workers[w].active && workers[w].type == 1) { // Type 1 = Gardener
                         int16_t wx = (workers[w].x >> 4) + 8;
                         int16_t wy = (workers[w].y >> 4) + 8;
-                        if (abs(screen_x - wx) < 16 && abs(screen_y - wy) < 16) {
-                            particle_state[i] = 0; // Healed
+                        // RADIUS 8 (Box 16x16) - Less effective
+                        if (abs(screen_x - wx) < 8 && abs(screen_y - wy) < 8) {
+                            particle_state[i] = 2; // ENRICHED (Gold)
                         }
                     } 
                 }
                 
-                uint8_t is_infected = particle_state[i];
+                uint8_t state = particle_state[i];
                 
                 // Draw 3x3 Blur Patch
                 for (int dy = -1; dy <= 1; dy++) {
@@ -279,7 +281,9 @@ bool galaxy_tick(void)
                             
                             // Color Logic
                             uint8_t is_pink = (i < (N/2));
-                            if (is_infected) is_pink = 0; // Force Cyan
+                            
+                            if (state == 1) is_pink = 0; // Force Cyan (Infected)
+                            if (state == 2) is_pink = 1; // Force Pink (Enriched)
                             
                             RIA.addr0 = addr;
                             RIA.step0 = 0; 
@@ -287,6 +291,10 @@ bool galaxy_tick(void)
                             
                             uint8_t pink = (old_val >> 4) & 0x0F;
                             uint8_t cyan = old_val & 0x0F;
+                            
+                            // VISUAL POP
+                            if (state == 1) pink = 0; // Kill Pink if Infected
+                            if (state == 2) cyan = 0; // Kill Cyan if Enriched
                             
                             // Strong Accumulation (+6 Center, +2 Neighbor)
                             uint8_t add_amount = (dx == 0 && dy == 0) ? 6 : 2;

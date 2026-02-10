@@ -18,9 +18,12 @@ The core visual is a **strange attractor** mathematical system, inspired by a ge
 
 ## 2. The Threat: Enemies 👾
 **Red/Orange Entities** that orbit the galaxy center.
-*   **Behavior**: They follow **Keplerian Orbits** around the galactic core.
-*   **Effect**: They release a viral agent that **infects** the galaxy.
-    *   Infection turns Gold matter into cold Cyan/Blue matter, disrupting the balance of the simulation.
+*   **Behavior**:
+    *   **Keplerian Orbits**: They follow elliptical paths around the core with random eccentricity.
+    *   **Respawn**: When destroyed, they respawn after **5 seconds** in a random "Safe Zone" on screen.
+*   **Effect**: 
+    *   **Infection**: They release a viral agent (Radius 16) that turns matter into cold **Cyan/Blue** trails.
+    *   The goal is to prevent the entire galaxy from turning blue.
 
 ## 3. The Defense: Workers 🛡️
 You can spawn workers to protect the galaxy. Workers also follow Keplerian orbits but can be directed by the player.
@@ -29,18 +32,19 @@ You can spawn workers to protect the galaxy. Workers also follow Keplerian orbit
 *   **Aim**: Move the reticle.
 *   **Spawn**: Click to release a worker.
 *   **Orbit Control**:
-    *   **Direction**: The worker spawns at the **Apocenter** (farthest point) of its orbit, aligned with your click. It will fall towards the center.
+    *   **Direction**: The worker spawns at the **Apocenter** (farthest point) aligned with your click. It will fall inward.
     *   **Shape**: The **Reticle Pulses**. 
-        *   Click when **Small** -> **Circular Orbit**.
-        *   Click when **Large** -> **Elliptical Orbit**.
+        *   Small Reticle -> **Circular Orbit**.
+        *   Large Reticle -> **Elliptical Orbit**.
 
 ### Worker Types
 *   **Guardians (Cyan)**: 
-    *   **Role**: Fighter.
-    *   **Ability**: Automatically seeks out and **destroys** nearby Enemies upon collision.
+    *   **Role**: Fighter / Kamikaze.
+    *   **Ability**: Upon collision, it **destroys the worker/enemy AND itself**. Use them to clear threats.
 *   **Gardeners (Magenta)**:
     *   **Role**: Healer.
-    *   **Ability**: Emits a healing field that **restores** infected particles to their natural state, reversing the damage done by enemies.
+    *   **Ability**: Emits a healing field (Radius 8) that restores particles to **Gold/Pink**.
+    *   **Limit**: You can have a maximum of **7 Gardeners** active at once.
 
 ## Technical Details 🛠️
 *   **Platform**: RP6502 (6502 CPU + Raspberry Pi Pico VGA).

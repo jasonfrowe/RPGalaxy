@@ -44,6 +44,15 @@ enemy_t enemies[MAX_ENEMIES];
 worker_t workers[MAX_WORKERS];
 
 void spawn_worker(uint8_t type, int16_t x, int16_t y) {
+    // CAP GARDENERS (Type 1) to 7
+    if (type == 1) {
+        int count = 0;
+        for (int k = 0; k < MAX_WORKERS; k++) {
+            if (workers[k].active && workers[k].type == 1) count++;
+        }
+        if (count >= 7) return; // Cap reached
+    }
+
     for (int i = 0; i < MAX_WORKERS; i++) {
         if (!workers[i].active) {
             workers[i].active = true;
@@ -154,15 +163,29 @@ void update_workers(void) {
         
         // --- INTERACTION LOGIC ---
         if (workers[i].type == 0) {
-            // GUARDIAN (Cyan): Seek & Destroy Enemies
+            // GUARDIAN (Cyan): Seek & Destroy Enemies AND Workers
+            // Check Enemies
             for (int e = 0; e < MAX_ENEMIES; e++) {
                 if (enemies[e].active) {
                     if (check_collision(workers[i].x, workers[i].y, enemies[e].x, enemies[e].y)) {
-                        // Collision! Destroy Enemy
+                        // Collision! Destroy Enemy AND Self
                         enemies[e].active = false;
-                        // Destroy Worker too? Or keep going?
-                        // Let's keep guardian alive for now, or reduce timer?
-                        // Let's add a "Hit" visual? Maybe later.
+                        enemies[e].timer = 300; // Respawn Delay (5s)
+                        workers[i].active = false; // Kamikaze
+                        break; // Self died, stop checking
+                    }
+                }
+            }
+            if (!workers[i].active) continue; // Died vs Enemy
+            
+            // Check Other Workers (Friendly Fire / Cleanup)
+            for (int w = 0; w < MAX_WORKERS; w++) {
+                if (w != i && workers[w].active) {
+                    // Destroy Worker AND Self
+                    if (check_collision(workers[i].x, workers[i].y, workers[w].x, workers[w].y)) {
+                        workers[w].active = false;
+                        workers[i].active = false; // Kamikaze
+                        break; 
                     }
                 }
             }
@@ -275,8 +298,61 @@ void update_enemies(void) {
         unsigned config_addr = ENEMY_CONFIG_BASE + (i * sizeof(vga_mode4_asprite_t)); // NOW AFFINE STRUCT
         
         if (!enemies[i].active) {
-            // Move offscreen
-            xram0_struct_set(config_addr, vga_mode4_asprite_t, y_pos_px, -32);
+            // Respawn Logic
+            if (enemies[i].timer > 0) {
+                enemies[i].timer--;
+                if (enemies[i].timer == 1) {
+                    // RESPAWN!
+                    // Reset to active
+                    enemies[i].active = true;
+                    enemies[i].timer = 0;
+                    
+                    // Pick Random Location (80..240, 10..170)
+                    // Box 160x160 centered.
+                    // Sanitize rand()
+                    int16_t rx = (abs(rand()) % 160) + 80; 
+                    int16_t ry = (abs(rand()) % 160) + 10;
+                    
+                    // Logic from spawn_enemy inline to avoid searching loop
+                    int16_t cx = 160;
+                    int16_t cy = 90;
+                    int16_t dx = rx - cx;
+                    int16_t dy = ry - cy;
+                    
+                    // Random Eccentricity (Cap at 64 = 0.25)
+                    // User suspects high e causes issues.
+                    enemies[i].eccentricity = (uint8_t)(abs(rand()) % 64);
+                    
+                    uint8_t phi = vector_to_angle(dx, dy);
+                    enemies[i].omega = phi + 128;
+                    enemies[i].angle = 128 << 8;
+                    
+                    int16_t adx = (dx < 0) ? -dx : dx;
+                    int16_t ady = (dy < 0) ? -dy : dy;
+                    int16_t r = (adx > ady) ? adx + ady/2 : ady + adx/2;
+                    
+                    uint16_t denom = 256 + enemies[i].eccentricity;
+                    int32_t num = (int32_t)r * 256;
+                    int16_t a_val = (int16_t)(num / denom);
+                    
+                    if (a_val > 85) a_val = 85; 
+                    if (a_val < 30) a_val = 30; 
+                    
+                    enemies[i].radius = (uint8_t)a_val;
+                    
+                    uint16_t calc_speed = 3500 / enemies[i].radius;
+                    if (calc_speed > 255) calc_speed = 255;
+                    if (calc_speed < 20) calc_speed = 20;
+                    enemies[i].speed = (uint8_t)calc_speed;
+                    
+                    // Initial Pos
+                    update_geometric_orbit(&enemies[i].x, &enemies[i].y, &enemies[i].angle, 
+                                           enemies[i].radius, enemies[i].eccentricity, enemies[i].speed, enemies[i].omega);
+                 }
+            } else {
+                // Move offscreen if purely inactive
+                xram0_struct_set(config_addr, vga_mode4_asprite_t, y_pos_px, -32);
+            }
             continue;
         }
 
