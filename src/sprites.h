@@ -14,6 +14,7 @@ typedef struct {
     uint8_t speed;  // Base orbital speed (8.8)
     int16_t timer;
     uint8_t frame;
+    uint8_t visual_angle; // For directional rotation
 } enemy_t;
 
 #define MAX_ENEMIES 8

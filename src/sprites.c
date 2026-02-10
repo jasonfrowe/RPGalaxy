@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-// #include "galaxy.h" // Removed as logic moved to galaxy.c checks
+#include "galaxy.h" 
 #include "sprites.h"
 #include "tables.h"
 #include "constants.h"
@@ -169,6 +169,9 @@ void update_workers(void) {
                 if (enemies[e].active) {
                     if (check_collision(workers[i].x, workers[i].y, enemies[e].x, enemies[e].y)) {
                         // Collision! Destroy Enemy AND Self
+                        // EXPLOSION: Red/Gold (Type 1) for Enemy Kill
+                        galaxy_explosion((workers[i].x >> 4), (workers[i].y >> 4), 1);
+                        
                         enemies[e].active = false;
                         enemies[e].timer = 300; // Respawn Delay (5s)
                         workers[i].active = false; // Kamikaze
@@ -183,6 +186,9 @@ void update_workers(void) {
                 if (w != i && workers[w].active) {
                     // Destroy Worker AND Self
                     if (check_collision(workers[i].x, workers[i].y, workers[w].x, workers[w].y)) {
+                        // EXPLOSION: Blue (Type 0) for Friendly Fire
+                        galaxy_explosion((workers[i].x >> 4), (workers[i].y >> 4), 0);
+                        
                         workers[w].active = false;
                         workers[i].active = false; // Kamikaze
                         break; 
@@ -357,8 +363,33 @@ void update_enemies(void) {
         }
 
         // --- GEOMETRIC PHYSICS ---
+        int16_t old_x = enemies[i].x;
+        int16_t old_y = enemies[i].y;
+        
         update_geometric_orbit(&enemies[i].x, &enemies[i].y, &enemies[i].angle, 
                                enemies[i].radius, enemies[i].eccentricity, enemies[i].speed, enemies[i].omega);
+
+        // Directional Rotation Logic
+        int16_t dx = enemies[i].x - old_x; // 12.4 fixed point
+        int16_t dy = enemies[i].y - old_y;
+        
+        if (abs(dx) > 4 || abs(dy) > 4) { // Threshold > 0.25 px movement
+             uint8_t move_angle = vector_to_angle(dx, dy);
+             
+             // SMOOTHING (Low Pass Filter)
+             // Create signed difference (-128 to +127) handling wrap-around
+             int8_t diff = (int8_t)(move_angle - enemies[i].visual_angle);
+             
+             // Move 1/4 of the way (Shift 2)
+             int8_t step = diff / 4;
+             
+             // Ensure minimum movement if diff exists (avoids stalling)
+             if (step == 0 && diff != 0) {
+                 step = (diff > 0) ? 1 : -1;
+             }
+             
+             enemies[i].visual_angle += step;
+        }
         
 
         
@@ -375,9 +406,10 @@ void update_enemies(void) {
         
         // Render - Affine Calculation
         int16_t scale = 256; // 1.0
-        // Fix: Use High Byte of 8.8 angle!
-        // ROTATION FIX: Negate angle for CW rotation (User Request)
-        uint8_t angle = -(enemies[i].angle >> 8);
+        
+        // DIRECTIONAL ROTATION
+        // Reflection Fix: Output = 192 - Input (Corrects for Screen=192-Affine)
+        uint8_t angle = 192 - enemies[i].visual_angle;
         
         int16_t c = SIN_LUT[(uint8_t)(angle + 64)]; // cos
         int16_t s = SIN_LUT[angle]; // sin

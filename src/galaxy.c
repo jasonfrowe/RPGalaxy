@@ -14,6 +14,22 @@
 // Globals
 static int16_t x, y, t;
 
+// Explosion State
+static bool exp_active = false;
+static int16_t exp_x = 0;
+static int16_t exp_y = 0;
+static uint8_t exp_type = 0;
+static uint8_t exp_timer = 0;
+
+void galaxy_explosion(int16_t x, int16_t y, uint8_t type) {
+    if (exp_active) return; // Only one active at a time for simplicity
+    exp_active = true;
+    exp_x = x;
+    exp_y = y;
+    exp_type = type;
+    exp_timer = 20; // Last for 20 frames
+}
+
 // Helper to wrap angle to 0-255 for LUT access
 // In Python: sin(i + y) where y is float (scaled by 256 here)
 // i is integer 0..63. 1 radian approx 41 units in 0..255 scale (256 / 2PI)
@@ -177,6 +193,12 @@ bool galaxy_tick(void)
             if (t > 1608) t -= 1608; 
             t += T_INC;
             
+            // Explosion Timer
+            if (exp_active) {
+                if (exp_timer > 0) exp_timer--;
+                else exp_active = false;
+            }
+            
             // Prepare for particles
             part_i = 0;
             part_j = 0;
@@ -233,6 +255,20 @@ bool galaxy_tick(void)
                 
                 int16_t screen_x = ((u * SCALE) >> 8) + (SCREEN_WIDTH / 2);
                 int16_t screen_y = ((v * SCALE) >> 8) + (SCREEN_HEIGHT / 2);
+
+                // --- EXPLOSION CHECK ---
+                if (exp_active) {
+                    if (abs(screen_x - exp_x) < 32 && abs(screen_y - exp_y) < 32) {
+                        // Color Burst
+                        if (exp_type == 0) particle_state[i] = 1; // Blue/Cyan
+                        else particle_state[i] = 2; // Red/Gold
+                        
+                        // Perturb Simulation to create "Shockwave"
+                        // Random nudge to x/y
+                         x += (rand() & 7) - 3;
+                         y += (rand() & 7) - 3;
+                    }
+                }
 
                 // --- INFECTION / HEALING CHECK ---
                 // Only check for i (the particle being updated)
