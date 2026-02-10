@@ -8,7 +8,9 @@ typedef struct {
     bool active;
     int16_t x, y;   // 12.4 Fixed Point
     uint16_t angle; // 8.8 Fixed Point (0-255 integer part)
+    uint8_t omega;  // Argument of Periapsis (Orientation)
     uint8_t radius; // Semi-major axis (pixels)
+    uint8_t eccentricity; // Orbital Eccentricity (0-255, usually 0-128)
     uint8_t speed;  // Base orbital speed (8.8)
     int16_t timer;
     uint8_t frame;
@@ -21,7 +23,9 @@ typedef struct {
     int16_t x, y;   // 12.4 Fixed Point
     uint8_t type;   // 0=Guardian (Cyan), 1=Gardener (Magenta)
     uint16_t angle; // 8.8 Fixed Point
+    uint8_t omega;  // Argument of Periapsis
     uint8_t radius; // Semi-major axis (pixels)
+    uint8_t eccentricity; // Orbital Eccentricity
     uint8_t speed;  // Base orbital speed
     int16_t timer;
     uint8_t frame;

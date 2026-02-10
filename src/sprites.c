@@ -64,20 +64,45 @@ void spawn_worker(uint8_t type, int16_t x, int16_t y) {
             int16_t dx = center_x - cx;
             int16_t dy = center_y - cy;
             
-            // Keplerian Parameter Extraction
-            // We want orbit to pass through (dx, dy) relative to Focus.
-            // e = 0.25. 1-e^2 = 15/16.
+            // Freeze Eccentricity at Spawn
+            workers[i].eccentricity = current_eccentricity;
             
-            // 1. Distance from Focus (r)
+            // Keplerian Parameter Extraction (Rotated Apocenter)
+            // We want orbit to pass through (dx, dy) relative to Focus.
+            // AND we want (dx, dy) to be the Apocenter (farthest point).
+            
+            // 1. Calculate Click Angle (Phi)
+            uint8_t phi = vector_to_angle(dx, dy);
+            
+            // 2. Set Omega so Apocenter aligns with Click
+            // Std Apocenter is at angle 128 (Left).
+            // We want Apocenter at Phi.
+            // Angle = Phi.
+            // Rotated Angle = Angle - Omega? No.
+            // x_rot = x cos w - y sin w.
+            // If x is Left (-a(1+e), 0). Angle 128.
+            // We want Result to be Direction Phi.
+            // - [cos w, sin w] is direction w + 128.
+            // So if we want direction Phi, then Phi = w + 128.
+            // w = Phi - 128 = Phi + 128 (mod 256).
+            workers[i].omega = phi + 128;
+            
+            // 3. Set Angle to Apocenter
+            workers[i].angle = 128 << 8; 
+            
+            // 4. Calculate Distance r
             int16_t adx = (dx < 0) ? -dx : dx;
             int16_t ady = (dy < 0) ? -dy : dy;
-            int16_t r0 = (adx > ady) ? adx + ady/2 : ady + adx/2; // approx hypot
+            int16_t r = (adx > ady) ? adx + ady/2 : ady + adx/2;
             
-            // 2. Semi-Major Axis (a)
-            // a = (r + ex) / (1-e^2)
-            // a = (r + dx/4) * 16 / 15
-            int32_t num_a = ((int32_t)r0 + (dx/4)) * 16;
-            int16_t a_val = num_a / 15;
+            // 5. Calculate a. r_apo = a(1+e).
+            // a = r / (1+e).
+            // In 8.8 fixed point: 1.0 = 256.
+            // a = (r * 256) / (256 + e).
+            
+            uint16_t denom = 256 + workers[i].eccentricity;
+            int32_t num = (int32_t)r * 256;
+            int16_t a_val = (int16_t)(num / denom);
             
             // Clamp Radius
             if (a_val > 85) a_val = 85; 
@@ -85,19 +110,7 @@ void spawn_worker(uint8_t type, int16_t x, int16_t y) {
             
             workers[i].radius = (uint8_t)a_val;
             
-            // 3. Eccentric Anomaly (t)
-            // x = a cos t - ae  =>  a cos t = x + ae
-            // y = b sin t       =>  a sin t = y / (1-e) = y * 4/3
-            
-            int16_t target_x = dx + (a_val / 4);
-            int16_t target_y = (dy * 4) / 3;
-            
-            uint8_t ang_byte = vector_to_angle(target_x, target_y);
-            
-            // Convert to 16-bit 8.8 (High byte = integer part)
-            workers[i].angle = (uint16_t)(ang_byte << 8);
-            
-            // Velocity Scaling based on calculated 'a' (radius)
+            // Velocity Scaling
             uint16_t calc_speed = 3500 / workers[i].radius;
             if (calc_speed > 255) calc_speed = 255;
             if (calc_speed < 20) calc_speed = 20;
@@ -105,7 +118,7 @@ void spawn_worker(uint8_t type, int16_t x, int16_t y) {
             
             // Initial position calculate
             update_geometric_orbit(&workers[i].x, &workers[i].y, &workers[i].angle, 
-                                   workers[i].radius, current_eccentricity, workers[i].speed);
+                                   workers[i].radius, current_eccentricity, workers[i].speed, workers[i].omega);
 
             workers[i].frame = (type == 0) ? 0 : 2; 
             workers[i].timer = 0;
@@ -131,7 +144,7 @@ void update_workers(void) {
         // Distance to center
         // --- GEOMETRIC PHYSICS ---
         update_geometric_orbit(&workers[i].x, &workers[i].y, &workers[i].angle, 
-                               workers[i].radius, current_eccentricity, workers[i].speed);
+                               workers[i].radius, workers[i].eccentricity, workers[i].speed, workers[i].omega);
         
         // Screen Coords (Center of Sprite)
         // Sprite is 16x16. We must draw at Top-Left.
@@ -214,33 +227,37 @@ void spawn_enemy(int16_t x, int16_t y) {
             int16_t dx = x - cx;
             int16_t dy = y - cy;
             
-            // Keplerian Parameter Extraction
+            // Freeze Eccentricity
+            enemies[i].eccentricity = current_eccentricity;
+            
+            // Apocenter Spawn Logic
+            uint8_t phi = vector_to_angle(dx, dy);
+            enemies[i].omega = phi + 128;
+            enemies[i].angle = 128 << 8;
+            
+            // Distance
             int16_t adx = (dx < 0) ? -dx : dx;
             int16_t ady = (dy < 0) ? -dy : dy;
-            int16_t r0 = (adx > ady) ? adx + ady/2 : ady + adx/2; 
+            int16_t r = (adx > ady) ? adx + ady/2 : ady + adx/2;
             
-            int32_t num_a = ((int32_t)r0 + (dx/4)) * 16;
-            int16_t a_val = num_a / 15;
+            // a = r / (1+e)
+            uint16_t denom = 256 + enemies[i].eccentricity;
+            int32_t num = (int32_t)r * 256;
+            int16_t a_val = (int16_t)(num / denom);
             
             if (a_val > 85) a_val = 85; 
             if (a_val < 30) a_val = 30; 
             
             enemies[i].radius = (uint8_t)a_val;
             
-            int16_t target_x = dx + (a_val / 4);
-            int16_t target_y = (dy * 4) / 3;
-            
-            uint8_t ang_byte = vector_to_angle(target_x, target_y);
-            enemies[i].angle = (uint16_t)(ang_byte << 8);
-            
-            // Velocity Scaling
+            // Speed
             uint16_t calc_speed = 3500 / enemies[i].radius;
             if (calc_speed > 255) calc_speed = 255;
             if (calc_speed < 20) calc_speed = 20;
-            enemies[i].speed = (uint8_t)calc_speed; 
+            enemies[i].speed = (uint8_t)calc_speed;
             
             update_geometric_orbit(&enemies[i].x, &enemies[i].y, &enemies[i].angle, 
-                                   enemies[i].radius, current_eccentricity, enemies[i].speed);
+                                   enemies[i].radius, current_eccentricity, enemies[i].speed, enemies[i].omega);
             
             enemies[i].timer = 0;
             enemies[i].frame = 0;
@@ -265,7 +282,7 @@ void update_enemies(void) {
 
         // --- GEOMETRIC PHYSICS ---
         update_geometric_orbit(&enemies[i].x, &enemies[i].y, &enemies[i].angle, 
-                               enemies[i].radius, current_eccentricity, enemies[i].speed);
+                               enemies[i].radius, enemies[i].eccentricity, enemies[i].speed, enemies[i].omega);
         
 
         
@@ -416,10 +433,10 @@ void update_sprites(void)
     e_calc = (e_calc * 5) >> 2;
     if (e_calc > 128) e_calc = 128;
     
-    // FIX: Freezing eccentricity to prevent "breathing" aliasing/zigzag.
-    // User reported Y-oscillation. This fixes it by keeping shape constant.
-    // current_eccentricity = (uint8_t)e_calc; 
-    current_eccentricity = 64; // Fixed Ellipse (0.25) 
+    // FIX: Re-enabling dynamic eccentricity as requested by user.
+    // Fixed zigzag via safe_mul_shift previously?
+    current_eccentricity = (uint8_t)e_calc; 
+    // current_eccentricity = 64; // Fixed Ellipse (0.25) 
     
     // Angle
     uint8_t angle = (uint8_t)sprite_angle;

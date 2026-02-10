@@ -98,7 +98,9 @@ uint8_t vector_to_angle(int16_t x, int16_t y) {
     return angle;
 }
 
-void update_geometric_orbit(int16_t *x_out, int16_t *y_out, uint16_t *angle_io, uint8_t radius, uint8_t eccentricity, uint8_t speed) {
+// 16-bit safe geometric orbit update
+void update_geometric_orbit(int16_t *x_out, int16_t *y_out, uint16_t *angle_io, 
+                            uint8_t radius, uint8_t eccentricity, uint8_t speed, uint8_t omega) {
     uint16_t ang_fixed = *angle_io;
     uint8_t ang_int = (ang_fixed >> 8) & 0xFF; 
     
@@ -131,17 +133,32 @@ void update_geometric_orbit(int16_t *x_out, int16_t *y_out, uint16_t *angle_io, 
     int16_t offset = ((uint16_t)radius * (uint16_t)eccentricity) >> 8;
     rel_x -= offset;
     
-    *x_out = (160 + rel_x) << 4;
-    *y_out = (90 + rel_y) << 4;
+    // Apply Rotation by Omega (Argument of Periapsis)
+    // x_rot = x * cos(w) - y * sin(w)
+    // y_rot = x * sin(w) + y * cos(w)
+    
+    int16_t cos_om = SIN_LUT[(uint8_t)(omega + 64)];
+    int16_t sin_om = SIN_LUT[omega];
+    
+    int16_t rot_x = safe_mul_shift(rel_x, cos_om) - safe_mul_shift(rel_y, sin_om);
+    int16_t rot_y = safe_mul_shift(rel_x, sin_om) + safe_mul_shift(rel_y, cos_om);
+    
+    *x_out = (160 + rot_x) << 4;
+    *y_out = (90 + rot_y) << 4;
     
     // 4. Update Angle (Kepler-lite)
     // modulation = speed * eccentricity. Both pos.
     uint16_t mod_factor = ((uint16_t)speed * (uint16_t)eccentricity) >> 8;
     
     // delta = mod_factor * c. Signed.
+    // At Pericenter (c=1), we want FASTER speed.
+    // So Speed + Delta.
+    // At Apocenter (c=-1), we want SLOWER speed.
+    // Speed + (-Delta) = Speed - Delta.
+    
     int16_t delta_mod = safe_mul_shift((int16_t)mod_factor, c);
     
-    int16_t new_speed = (int16_t)speed - delta_mod; 
+    int16_t new_speed = (int16_t)speed + delta_mod;   
     if (new_speed < 20) new_speed = 20;
 
     *angle_io = ang_fixed + (uint16_t)new_speed;
