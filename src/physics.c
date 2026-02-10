@@ -53,10 +53,27 @@ uint8_t vector_to_angle(int16_t x, int16_t y) {
     int16_t min_val = (abs_x > abs_y) ? abs_y : abs_x;
     
     // Linear approximation: angle = (min * 32) / max
-    // Max error ~4 degrees (at 22.5 deg). Good enough for spawn.
+    // Use prescaling to avoid 32-bit math
+    // We need (min * 32) to fit in 16-bit (max 32767).
+    // So min must be < 1024.
+    // Shift both down until max < 1024.
+    
     uint8_t base_angle = 0;
+    
     if (max_val > 0) {
-        base_angle = (uint8_t)(( (int32_t)min_val * 32 ) / max_val);
+        // Prescale for 16-bit safety
+        // Max possible dx is screen width * 16 approx 5120.
+        // If > 1000, shift by 3 (div 8) to bring under 1000.
+        if (max_val > 1000) {
+            max_val >>= 3;
+            min_val >>= 3;
+        }
+        
+        // Final check to avoid divide by zero if shifted to 0 logic
+        if (max_val > 0) {
+            // (1000 * 32) = 32000 < 32767. Safe int16 multiply.
+            base_angle = (uint8_t)(( min_val * 32 ) / max_val);
+        }
     }
     
     // 2. Map back to correct Octant

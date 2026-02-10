@@ -215,19 +215,21 @@ void update_workers(void) {
         // Let's just spin them slowly based on position for now
         int16_t rot = workers[i].x; 
         
-        int16_t scale = 256; 
+        // Optimized Affine (Scale = 256 means 1.0, so A=c, etc.)
         int16_t c = SIN_LUT[(uint8_t)(rot + 64)]; 
         int16_t s = SIN_LUT[(uint8_t)rot];
         
-        int16_t A = ((int32_t)scale * c) >> 8; 
-        int16_t B = ((int32_t)scale * (-s)) >> 8;
-        int16_t C = ((int32_t)scale * s) >> 8;
-        int16_t D = ((int32_t)scale * c) >> 8;
+        int16_t A = c;
+        int16_t B = -s;
+        int16_t C = s;
+        int16_t D = c;
         
         // Center 8,8
-        int32_t center_fixed = 8 << 8;
-        int16_t TX = (int16_t)(center_fixed - ((int32_t)A * 8) - ((int32_t)B * 8));
-        int16_t TY = (int16_t)(center_fixed - ((int32_t)C * 8) - ((int32_t)D * 8));
+        // 8<<8 = 2048. 
+        // A*8 fits in 16-bit (256*8 = 2048).
+        // No 32-bit math needed for simple centering.
+        int16_t TX = 2048 - (A * 8) - (B * 8);
+        int16_t TY = 2048 - (C * 8) - (D * 8);
         
         xram0_struct_set(config_addr, vga_mode4_asprite_t, transform[0], A); 
         xram0_struct_set(config_addr, vga_mode4_asprite_t, transform[1], B);   
@@ -405,8 +407,6 @@ void update_enemies(void) {
         }
         
         // Render - Affine Calculation
-        int16_t scale = 256; // 1.0
-        
         // DIRECTIONAL ROTATION
         // Reflection Fix: Output = 192 - Input (Corrects for Screen=192-Affine)
         uint8_t angle = 192 - enemies[i].visual_angle;
@@ -414,19 +414,17 @@ void update_enemies(void) {
         int16_t c = SIN_LUT[(uint8_t)(angle + 64)]; // cos
         int16_t s = SIN_LUT[angle]; // sin
         
-        int16_t A = ((int32_t)scale * c) >> 8; 
-        int16_t B = ((int32_t)scale * (-s)) >> 8;
-        int16_t C = ((int32_t)scale * s) >> 8;
-        int16_t D = ((int32_t)scale * c) >> 8;
+        // Optimized Affine (Scale = 256)
+        int16_t A = c; 
+        int16_t B = -s;
+        int16_t C = s;
+        int16_t D = c;
 
-        // Centering Logic (16x16)
-        int16_t cx = 8; // Center of 16x16 is 8
-        int16_t cy = 8;
-        int32_t center_fixed = 8 << 8; // 2048
-        
-        // TX/TY
-        int16_t TX = (int16_t)(center_fixed - ((int32_t)A * cx) - ((int32_t)B * cy));
-        int16_t TY = (int16_t)(center_fixed - ((int32_t)C * cx) - ((int32_t)D * cy));
+        // Centering Logic (16x16) means center is 8,8.
+        // Wait, line 423 says cx=8, cy=8. 
+        // 8<<8 = 2048.
+        int16_t TX = 2048 - (A * 8) - (B * 8);
+        int16_t TY = 2048 - (C * 8) - (D * 8);
 
         unsigned sprite_ptr = ENEMY_DATA_ADDR + (enemies[i].frame * 512);
 
