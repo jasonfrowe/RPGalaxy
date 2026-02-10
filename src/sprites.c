@@ -9,8 +9,13 @@
 #include "tables.h"
 #include "constants.h"
 
+#include "physics.h"
+
 #define SPRITE_CONFIG_ADDR 0xFD00
-#define SPRITE_DATA_ADDR   0xF500 // Reticle Data (Moved to 0xF500)
+#define SPRITE_DATA_ADDR   0xF500 
+
+static uint8_t current_eccentricity = 0; // 0..128
+
 
 // Top of file helpers
 // Squared distance check for collision (16x16 sprites, radius ~8)
@@ -43,28 +48,66 @@ void spawn_worker(uint8_t type, int16_t x, int16_t y) {
         if (!workers[i].active) {
             workers[i].active = true;
             workers[i].type = type;
-            workers[i].x = x << 4; // 12.4
-            workers[i].y = y << 4;
             
-            // Launch Velocity based on Reticle Angle
-            // Angle is 0..255.
-            uint8_t angle = (uint8_t)sprite_angle;
+            workers[i].type = type;
             
-            // Speed: Fixed for now, or based on pulse?
-            // Let's use a good orbital injection speed.
-            int16_t speed = 48; // 3.0 pixels/frame
+            // Set orbit parameters (Geometric)
+            // Input x,y is Reticle Top-Left (32x32)
+            // We want orbit to be relative to Reticle Center (+16)
+            // Screen Center is 160, 90.
             
-            // vx = speed * cos(angle)
-            // vy = speed * sin(angle)
-            // SIN_LUT is 8.8 (256 = 1.0)
+            int16_t center_x = x + 16;
+            int16_t center_y = y + 16;
             
-            int32_t c = (int32_t)SIN_LUT[(uint8_t)(angle + 64)];
-            int32_t s = (int32_t)SIN_LUT[angle];
+            int16_t cx = 160;
+            int16_t cy = 90;
+            int16_t dx = center_x - cx;
+            int16_t dy = center_y - cy;
             
-            workers[i].vx = (int16_t)((c * speed) >> 8);
-            workers[i].vy = (int16_t)((s * speed) >> 8);
+            // Keplerian Parameter Extraction
+            // We want orbit to pass through (dx, dy) relative to Focus.
+            // e = 0.25. 1-e^2 = 15/16.
+            
+            // 1. Distance from Focus (r)
+            int16_t adx = (dx < 0) ? -dx : dx;
+            int16_t ady = (dy < 0) ? -dy : dy;
+            int16_t r0 = (adx > ady) ? adx + ady/2 : ady + adx/2; // approx hypot
+            
+            // 2. Semi-Major Axis (a)
+            // a = (r + ex) / (1-e^2)
+            // a = (r + dx/4) * 16 / 15
+            int32_t num_a = ((int32_t)r0 + (dx/4)) * 16;
+            int16_t a_val = num_a / 15;
+            
+            // Clamp Radius
+            if (a_val > 85) a_val = 85; 
+            if (a_val < 20) a_val = 20;
+            
+            workers[i].radius = (uint8_t)a_val;
+            
+            // 3. Eccentric Anomaly (t)
+            // x = a cos t - ae  =>  a cos t = x + ae
+            // y = b sin t       =>  a sin t = y / (1-e) = y * 4/3
+            
+            int16_t target_x = dx + (a_val / 4);
+            int16_t target_y = (dy * 4) / 3;
+            
+            uint8_t ang_byte = vector_to_angle(target_x, target_y);
+            
+            // Convert to 16-bit 8.8 (High byte = integer part)
+            workers[i].angle = (uint16_t)(ang_byte << 8);
+            
+            // Velocity Scaling based on calculated 'a' (radius)
+            uint16_t calc_speed = 3500 / workers[i].radius;
+            if (calc_speed > 255) calc_speed = 255;
+            if (calc_speed < 20) calc_speed = 20;
+            workers[i].speed = (uint8_t)calc_speed;
+            
+            // Initial position calculate
+            update_geometric_orbit(&workers[i].x, &workers[i].y, &workers[i].angle, 
+                                   workers[i].radius, current_eccentricity, workers[i].speed);
 
-            workers[i].frame = (type == 0) ? 0 : 2; // Start frame
+            workers[i].frame = (type == 0) ? 0 : 2; 
             workers[i].timer = 0;
             return;
         }
@@ -86,32 +129,15 @@ void update_workers(void) {
         // --- GRAVITY PHYSICS ---
         
         // Distance to center
-        int16_t dx = cx - workers[i].x;
-        int16_t dy = cy - workers[i].y;
+        // --- GEOMETRIC PHYSICS ---
+        update_geometric_orbit(&workers[i].x, &workers[i].y, &workers[i].angle, 
+                               workers[i].radius, current_eccentricity, workers[i].speed);
         
-        // Gravity Force (Proportional to distance = Spring, Constant = Real Gravity?)
-        // Let's use Spring-like for stability first (Hooks Law F=kx)
-        // Works well for keeping things on screen.
-        int16_t ax = dx / 128; // Tuning
-        int16_t ay = dy / 128;
-        
-        workers[i].vx += ax;
-        workers[i].vy += ay;
-        
-        // Drag (Air Resistance) -> Prevents infinite speed
-        workers[i].vx -= (workers[i].vx / 128);
-        workers[i].vy -= (workers[i].vy / 128);
-
-        // Move
-        workers[i].x += workers[i].vx;
-        workers[i].y += workers[i].vy;
-        
-        // Kill if way off screen? Or Wrap?
-        // Let gravity pull them back.
-        
-        // Screen Coords
-        int16_t px = workers[i].x >> 4;
-        int16_t py = workers[i].y >> 4;
+        // Screen Coords (Center of Sprite)
+        // Sprite is 16x16. We must draw at Top-Left.
+        // x >> 4 gives Center. Subtract 8.
+        int16_t px = ((workers[i].x >> 4) - 8);
+        int16_t py = ((workers[i].y >> 4) - 8);
         
         // --- INTERACTION LOGIC ---
         if (workers[i].type == 0) {
@@ -182,21 +208,42 @@ void spawn_enemy(int16_t x, int16_t y) {
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!enemies[i].active) {
             enemies[i].active = true;
-            enemies[i].x = x << 4; // Convert to 12.4
-            enemies[i].y = y << 4;
             
-            // Initial Velocity: Push towards center slightly
-             int16_t cx = 160 << 4;
-            int16_t cy = 90 << 4;
-            int16_t dx = cx - enemies[i].x;
-            int16_t dy = cy - enemies[i].y;
+            int16_t cx = 160;
+            int16_t cy = 90;
+            int16_t dx = x - cx;
+            int16_t dy = y - cy;
             
-            enemies[i].vx = dx / 256; 
-            enemies[i].vy = dy / 256;
+            // Keplerian Parameter Extraction
+            int16_t adx = (dx < 0) ? -dx : dx;
+            int16_t ady = (dy < 0) ? -dy : dy;
+            int16_t r0 = (adx > ady) ? adx + ady/2 : ady + adx/2; 
             
-            enemies[i].angle = 0;
-            enemies[i].frame = 0;
+            int32_t num_a = ((int32_t)r0 + (dx/4)) * 16;
+            int16_t a_val = num_a / 15;
+            
+            if (a_val > 85) a_val = 85; 
+            if (a_val < 30) a_val = 30; 
+            
+            enemies[i].radius = (uint8_t)a_val;
+            
+            int16_t target_x = dx + (a_val / 4);
+            int16_t target_y = (dy * 4) / 3;
+            
+            uint8_t ang_byte = vector_to_angle(target_x, target_y);
+            enemies[i].angle = (uint16_t)(ang_byte << 8);
+            
+            // Velocity Scaling
+            uint16_t calc_speed = 3500 / enemies[i].radius;
+            if (calc_speed > 255) calc_speed = 255;
+            if (calc_speed < 20) calc_speed = 20;
+            enemies[i].speed = (uint8_t)calc_speed; 
+            
+            update_geometric_orbit(&enemies[i].x, &enemies[i].y, &enemies[i].angle, 
+                                   enemies[i].radius, current_eccentricity, enemies[i].speed);
+            
             enemies[i].timer = 0;
+            enemies[i].frame = 0;
             return;
         }
     }
@@ -216,36 +263,15 @@ void update_enemies(void) {
             continue;
         }
 
-        // Logic: Seek Center (Spring Physics)
-        // Target: Center (160, 90)
-        int16_t target_x = 160 << 4;
-        int16_t target_y = 90 << 4;
-        
-        int16_t dx = target_x - enemies[i].x;
-        int16_t dy = target_y - enemies[i].y;
-        
-        // Acceleration proportional to distance (Spring 1/256)
-        int16_t ax = dx / 256;
-        int16_t ay = dy / 256;
-        
-        // Apply Acceleration
-        enemies[i].vx += ax;
-        enemies[i].vy += ay;
-        
-        // Apply Drag (Friction) to prevent eternal orbiting
-        // v = v - (v/64)
-        enemies[i].vx -= (enemies[i].vx / 64);
-        enemies[i].vy -= (enemies[i].vy / 64);
-
-        // Move
-        enemies[i].x += enemies[i].vx;
-        enemies[i].y += enemies[i].vy;
+        // --- GEOMETRIC PHYSICS ---
+        update_geometric_orbit(&enemies[i].x, &enemies[i].y, &enemies[i].angle, 
+                               enemies[i].radius, current_eccentricity, enemies[i].speed);
         
 
         
         // Logic: Rotate based on velocity? Or just spin?
-        // Let's spin for now.
-        enemies[i].angle += 2;
+        // Let's spin for now by using the orbital angle (Tidal Locking)
+        // enemies[i].angle += 2; // REMOVED: This confounds the orbital position!
 
         // Animation
         enemies[i].timer++;
@@ -256,7 +282,8 @@ void update_enemies(void) {
         
         // Render - Affine Calculation
         int16_t scale = 256; // 1.0
-        uint8_t angle = enemies[i].angle;
+        // Fix: Use High Byte of 8.8 angle!
+        uint8_t angle = (enemies[i].angle >> 8);
         int16_t c = SIN_LUT[(uint8_t)(angle + 64)]; // cos
         int16_t s = SIN_LUT[angle]; // sin
         
@@ -285,8 +312,9 @@ void update_enemies(void) {
         xram0_struct_set(config_addr, vga_mode4_asprite_t, transform[5], TY);
         
         // CONVERT BACK TO PIXELS (>> 4)
-        xram0_struct_set(config_addr, vga_mode4_asprite_t, x_pos_px, enemies[i].x >> 4);
-        xram0_struct_set(config_addr, vga_mode4_asprite_t, y_pos_px, enemies[i].y >> 4);
+        // Physics returns Center. Sprite needs Top-Left. 16x16 -> -8.
+        xram0_struct_set(config_addr, vga_mode4_asprite_t, x_pos_px, ((enemies[i].x >> 4) - 8));
+        xram0_struct_set(config_addr, vga_mode4_asprite_t, y_pos_px, ((enemies[i].y >> 4) - 8));
         xram0_struct_set(config_addr, vga_mode4_asprite_t, xram_sprite_ptr, sprite_ptr);
         xram0_struct_set(config_addr, vga_mode4_asprite_t, log_size, 4); // 16x16
         xram0_struct_set(config_addr, vga_mode4_asprite_t, has_opacity_metadata, false);
@@ -372,6 +400,26 @@ void update_sprites(void)
     int16_t s_val = SIN_LUT[pulse_time & 0xFF]; // -256..256
     // We want output varying by +/- 50. s_val/5?
     int16_t scale = 256 + (s_val / 5); 
+    
+    // Calculate Eccentricity based on scale
+    // scale max ~307 -> e=0
+    // scale min ~205 -> e=0.5 (128)
+    // Range = 100.
+    // e = (307 - scale) * K.
+    // if scale=307, e=0. if scale=205, e=102*1.25 = 128.
+    // e = (307 - scale) * 5 / 4.
+    
+    int16_t e_calc = 307 - scale;
+    if (e_calc < 0) e_calc = 0;
+    // (e * 5) >> 2 might exceed 16-bit if e is large? 
+    // e_calc is max 102. 102*5 = 510. Fits easily.
+    e_calc = (e_calc * 5) >> 2;
+    if (e_calc > 128) e_calc = 128;
+    
+    // FIX: Freezing eccentricity to prevent "breathing" aliasing/zigzag.
+    // User reported Y-oscillation. This fixes it by keeping shape constant.
+    // current_eccentricity = (uint8_t)e_calc; 
+    current_eccentricity = 64; // Fixed Ellipse (0.25) 
     
     // Angle
     uint8_t angle = (uint8_t)sprite_angle;

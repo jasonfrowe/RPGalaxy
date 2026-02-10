@@ -6,11 +6,12 @@
 
 typedef struct {
     bool active;
-    int16_t x, y;   // 12.4 Fixed Point (Coordinate << 4)
-    int16_t vx, vy; // 12.4 Fixed Point Velocity
-    uint8_t angle;  // Rotation (0-255)
+    int16_t x, y;   // 12.4 Fixed Point
+    uint16_t angle; // 8.8 Fixed Point (0-255 integer part)
+    uint8_t radius; // Semi-major axis (pixels)
+    uint8_t speed;  // Base orbital speed (8.8)
     int16_t timer;
-    uint8_t frame; // 0..3
+    uint8_t frame;
 } enemy_t;
 
 #define MAX_ENEMIES 8
@@ -18,8 +19,10 @@ typedef struct {
 typedef struct {
     bool active;
     int16_t x, y;   // 12.4 Fixed Point
-    int16_t vx, vy; // 12.4 Fixed Point
     uint8_t type;   // 0=Guardian (Cyan), 1=Gardener (Magenta)
+    uint16_t angle; // 8.8 Fixed Point
+    uint8_t radius; // Semi-major axis (pixels)
+    uint8_t speed;  // Base orbital speed
     int16_t timer;
     uint8_t frame;
 } worker_t;

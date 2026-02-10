@@ -42,6 +42,7 @@ target_sources(RPGalaxy PRIVATE
     src/galaxy.c
     src/sprites.c
     src/input.c
+    src/physics.c
 )
 
 target_link_libraries(RPGalaxy PRIVATE m)
