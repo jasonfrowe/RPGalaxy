@@ -22,14 +22,11 @@ add_executable(RPGalaxy)
 rp6502_asset(RPGalaxy 0x1F500 images/reticle.bin)
 rp6502_asset(RPGalaxy 0x1E500 images/enemy.bin)
 rp6502_asset(RPGalaxy 0x1ED00 images/worker.bin)
+rp6502_asset(RPGalaxy help src/main.hlp)
 
 rp6502_executable(RPGalaxy
-    reticle.bin.rp6502
-    enemy.bin.rp6502
-    worker.bin.rp6502
     DATA file
     RESET file
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.hlp
 )
 
 
