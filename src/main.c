@@ -8,6 +8,7 @@
 #include "galaxy.h"
 #include "sprites.h"
 #include "input.h"
+#include "usb_hid_keys.h"
 
 #define SONG_HZ 60
 
@@ -111,6 +112,7 @@ int main(void)
             
             // Input Processing
             handle_input();
+            if (key(KEY_ESC)) exit(0);
 
             // Worker Spawning (Simple Cooldown)
             static int spawn_cooldown = 0;

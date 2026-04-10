@@ -23,6 +23,7 @@ rp6502_asset(RPGalaxy 0x1F500 images/reticle.bin)
 rp6502_asset(RPGalaxy 0x1E500 images/enemy.bin)
 rp6502_asset(RPGalaxy 0x1ED00 images/worker.bin)
 rp6502_asset(RPGalaxy help src/main.hlp)
+rp6502_asset(RPGalaxy SPOOKY.BIN    music/SPOOKY.BIN)
 
 rp6502_executable(RPGalaxy
     DATA file

@@ -1,7 +1,7 @@
 #ifndef OPL_H
 #define OPL_H
 
-#define MUSIC_FILENAME "SPOOKY.BIN"
+#define MUSIC_FILENAME "ROM:SPOOKY.BIN"
 
 typedef struct {
     uint16_t delay_ms; 
